@@ -10,6 +10,7 @@ import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -32,96 +33,112 @@ public class Main {
 				}
 				
 				//_process(_getOutputFilename(dir));				
-				_processNew(_getOutputFilename(dir));
+				//_processNew(_getOutputFilename(dir));
+				_processBP(_getOutputFilenameBP(dir));
 			} else {
 				System.out.printf("%s is not a directory\n", args[0]);
 			}
 		}
 	}
 	
-	private static List<WaveData> dataECG = new ArrayList<WaveData>();
-	private static List<WaveData> dataPleth = new LinkedList<WaveData>();
-	
-	private static String _getOutputFilename(File dir) {
-		return dir.getPath() + "\\" + dir.getName() + ".csv";
-	}
-	
-	/* Algorithm
-	1. Find the 1st peak of ECG
-	2. Find the 2nd peak of ECG
-	3. During 1-2, find the peak of Pleth
-	4. Calculate tPleth - tEcg1, and save result (use tPleth as X-axis)
-	5. Loop 1-4 until data are processed
-	 */
-	private static void _process(String fout) {
-		WaveData peakECG1 = null;
-		WaveData peakECG2 = null;
-		WaveData peakPleth = null;
-
-		System.out.print("Processing");
-		int cnt = 0;
+	private static void _processBP(String fout) {
+		System.out.print("Processing INVP(BP)...");
+		
+		StringBuffer sbuf = new StringBuffer();
+		sbuf.append("Type,SD,CV(%)");
+		sbuf.append(System.lineSeparator());
+		
+		// normal BP
+		_calculateSDnCV(dataBP, "BP(All)", sbuf);
+		
+		// build list of max BPs
+		List<WaveData> maxBPList = _getMaxBPList(dataBP, 100);
+		_calculateSDnCV(maxBPList, "BP(Max)", sbuf);
+		
+		// build list of min BPs
+		//System.out.println("Build list of min BPs: TODO");
+		List<WaveData> minBPList = _getMinBPList(dataBP, 100);
+		_calculateSDnCV(minBPList, "BP(Min)", sbuf);
+		
 		try {
 			FileWriter fw = new FileWriter(fout);
 			BufferedWriter bw = new BufferedWriter(fw);
-			bw.write("Time,Diff(sec)");
-			bw.newLine();
-			
-			// scan dataECG by frequency 300
-			int frequency = 300;
-			//for (int i=0; i<dataECG.size(); i+=frequency) {
-			for (int i=0; i<dataECG.size();) {
-				//WaveData peakECG = _getPeakECGByFrequency(dataECG, i, frequency);
-				
-				// get peakECG and related index by frequency
-				WaveData peakECG = dataECG.get(i);
-				int peakId = i;	// peak index
-				for (int j=i+1; j<i+frequency; ++j) {
-					if (j >= dataECG.size()) break;
-					if (peakECG.getValue() < dataECG.get(j).getValue()) {
-						peakECG = dataECG.get(j);
-						peakId = j;
-					}
-				}
-				// import: adjust i to the start of the next interval
-				i = peakId + frequency/2;
-				
-				
-				if (peakECG1 == null) {
-					peakECG1 = peakECG;
-				} else if (peakECG2 == null) {
-					peakECG2 = peakECG;
-					// Step 3
-					peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
-					//System.out.println("\npeakECG1: " + peakECG1);
-					//System.out.println("peakPleth: " + peakPleth);
-					//System.out.println("peakECG2: " + peakECG2);
-					
-					// Step 4
-					if (peakPleth != null) {
-						double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
-						//System.out.println("tDiff: " + tDiff);
-						// write result to file
-						bw.write(peakPleth.getTime() + "," + tDiff);
-						bw.newLine();
-						System.out.print(".");
-						cnt++;
-						if (cnt % 100 == 0) {
-							System.out.println();
-						}
-					}
-					// reset
-					peakECG1 = peakECG2;
-					peakECG2 = null;
-					peakPleth = null;
-				}
-			}
+			bw.write(sbuf.toString());
 			bw.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 		System.out.println("done!");
-		System.out.println("Data size: " + cnt);
 	}
+
+	private static void _calculateSDnCV(List<WaveData> list, String type, StringBuffer sbuf) {
+		float mean = _getMean(list);
+		float sd = _getSD(list);
+		// calculate CV (SD/MN)
+		float cv = sd/mean;
+		//System.out.printf("SD: %.2f, CV: %.2f%%£¬ list size: %d\n", sd, cv*100, list.size());
+		sbuf.append(type + "," + sd + "," + cv*100);
+		sbuf.append(System.lineSeparator());
+	}
+
+	private static List<WaveData> _getMaxBPList(List<WaveData> list, int sampleRate) {
+		return _getExtremeBPList(list, sampleRate, WaveData.maxValueComp);
+	}
+	private static List<WaveData> _getMinBPList(List<WaveData> list, int sampleRate) {
+		return _getExtremeBPList(list, sampleRate, WaveData.minValueComp);
+	}
+
+	private static List<WaveData> _getExtremeBPList(List<WaveData> list, int sampleRate,
+			Comparator<WaveData> comp) {
+		List<WaveData> extremeBPList = new ArrayList<WaveData>();
+		for (int i=0; i<list.size();) {
+			WaveData extremeBP = list.get(i);
+			int extId = i;	// extremum BP index
+			for (int j=i+1; j<i+sampleRate && j<list.size(); ++j) {
+				if (comp.compare(extremeBP, list.get(j)) < 0) {
+					extremeBP = list.get(j);
+					extId = j;
+				}
+			}
+			extremeBPList.add(extremeBP);
+			// import: adjust i to the start of the next interval
+			i = extId + sampleRate/2;
+		}
+		return extremeBPList;
+	}
+
+	private static float _getMean(List<WaveData> list) {
+		float sum = 0;
+		for (WaveData wd : list) {
+			sum += wd.getValue();
+		}
+		return sum / list.size();
+	}
+
+	// calculate SD
+	// precondition: input data is within 1 hour
+	private static float _getSD(List<WaveData> list) {
+		float mean = _getMean(list);
+		float sum = 0;
+		for (WaveData wd : list) {
+			float diff = wd.getValue() - mean;
+			sum += diff*diff;
+		}
+		return (float)Math.sqrt(sum/list.size());
+	}
+
+	private static List<WaveData> dataECG = new ArrayList<WaveData>();
+	private static List<WaveData> dataPleth = new LinkedList<WaveData>();
+	private static List<WaveData> dataBP = new ArrayList<WaveData>();	// INVP
+	
+	private static String _getOutputFilename(File dir) {
+		return dir.getPath() + "\\" + dir.getName() + ".csv";
+	}
+	private static String _getOutputFilenameBP(File dir) {
+		return dir.getPath() + "\\" + dir.getName() + "BP_info.csv";
+	}
+	
+	
 
 	// Step 4: get time interval by seconds
 	private static double _getInterval(String t1, String t2) {
@@ -204,6 +221,10 @@ public class Main {
 	        		System.out.println("Found Pleth file: " + f.getName());
 	        		type = "Pleth";
 	        		data = dataPleth;
+	        	} else if (readLine.contains("INVP")) {
+	        		System.out.println("Found INVP file: " + f.getName());
+	        		type = "BP";
+	        		data = dataBP;
 	        	}
 	        	if (!type.isEmpty()) {
 	    	        while ((readLine = buf.readLine()) != null) {
@@ -221,6 +242,14 @@ public class Main {
         }
 	}
 	
+	
+	/* Algorithm
+	1. Find the 1st peak of ECG
+	2. Find the 2nd peak of ECG
+	3. During 1-2, find the peak of Pleth
+	4. Calculate tPleth - tEcg1, and save result (use tPleth as X-axis)
+	5. Loop 1-4 until data are processed
+	 */
 	// new version using StringBuffer, for performance improvement
 	private static void _processNew(String fout) {
 		WaveData peakECG1 = null;
@@ -304,5 +333,77 @@ public class Main {
 		System.out.println("done!");
 		System.out.println("Data size: " + cnt);
 	}
+	
+	/*
+	private static void _process(String fout) {
+		WaveData peakECG1 = null;
+		WaveData peakECG2 = null;
+		WaveData peakPleth = null;
+
+		System.out.print("Processing");
+		int cnt = 0;
+		try {
+			FileWriter fw = new FileWriter(fout);
+			BufferedWriter bw = new BufferedWriter(fw);
+			bw.write("Time,Diff(sec)");
+			bw.newLine();
+			
+			// scan dataECG by frequency 300
+			int frequency = 300;
+			//for (int i=0; i<dataECG.size(); i+=frequency) {
+			for (int i=0; i<dataECG.size();) {
+				//WaveData peakECG = _getPeakECGByFrequency(dataECG, i, frequency);
+				
+				// get peakECG and related index by frequency
+				WaveData peakECG = dataECG.get(i);
+				int peakId = i;	// peak index
+				for (int j=i+1; j<i+frequency; ++j) {
+					if (j >= dataECG.size()) break;
+					if (peakECG.getValue() < dataECG.get(j).getValue()) {
+						peakECG = dataECG.get(j);
+						peakId = j;
+					}
+				}
+				// import: adjust i to the start of the next interval
+				i = peakId + frequency/2;
+				
+				
+				if (peakECG1 == null) {
+					peakECG1 = peakECG;
+				} else if (peakECG2 == null) {
+					peakECG2 = peakECG;
+					// Step 3
+					peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
+					//System.out.println("\npeakECG1: " + peakECG1);
+					//System.out.println("peakPleth: " + peakPleth);
+					//System.out.println("peakECG2: " + peakECG2);
+					
+					// Step 4
+					if (peakPleth != null) {
+						double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
+						//System.out.println("tDiff: " + tDiff);
+						// write result to file
+						bw.write(peakPleth.getTime() + "," + tDiff);
+						bw.newLine();
+						System.out.print(".");
+						cnt++;
+						if (cnt % 100 == 0) {
+							System.out.println();
+						}
+					}
+					// reset
+					peakECG1 = peakECG2;
+					peakECG2 = null;
+					peakPleth = null;
+				}
+			}
+			bw.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		System.out.println("done!");
+		System.out.println("Data size: " + cnt);
+	}
+	*/
 
 }

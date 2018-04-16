@@ -55,6 +55,27 @@ public class WaveData {
 		}
 	};
 	
+	public static Comparator<WaveData> maxValueComp = new Comparator<WaveData>() {
+		public int compare(WaveData wd1, WaveData wd2) {
+			if (wd1.getValue() > wd2.getValue()) {
+				return 1;
+			} else if (wd1.getValue() < wd2.getValue()) {
+				return -1;
+			}
+			return 0;	// equal
+		}
+	};
+	
+	public static Comparator<WaveData> minValueComp = new Comparator<WaveData>() {
+		public int compare(WaveData wd1, WaveData wd2) {
+			if (wd2.getValue() > wd1.getValue()) {
+				return 1;
+			} else if (wd2.getValue() < wd1.getValue()) {
+				return -1;
+			}
+			return 0;	// equal
+		}
+	};
 	
 	
 }
