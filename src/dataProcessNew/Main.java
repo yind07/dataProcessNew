@@ -56,7 +56,6 @@ public class Main {
 		_calculateSDnCV(maxBPList, "BP(Max)", sbuf);
 		
 		// build list of min BPs
-		//System.out.println("Build list of min BPs: TODO");
 		List<WaveData> minBPList = _getMinBPList(dataBP, 100);
 		_calculateSDnCV(minBPList, "BP(Min)", sbuf);
 		
@@ -72,11 +71,11 @@ public class Main {
 	}
 
 	private static void _calculateSDnCV(List<WaveData> list, String type, StringBuffer sbuf) {
-		float mean = _getMean(list);
-		float sd = _getSD(list);
+		double mean = _getMean(list);
+		double sd = _getSD(list);
 		// calculate CV (SD/MN)
-		float cv = sd/mean;
-		//System.out.printf("SD: %.2f, CV: %.2f%%£¬ list size: %d\n", sd, cv*100, list.size());
+		double cv = sd/mean;
+		System.out.printf("\nSD: %.5f, CV: %.2f%%£¬ list size: %d", sd, cv*100, list.size());
 		sbuf.append(type + "," + sd + "," + cv*100);
 		sbuf.append(System.lineSeparator());
 	}
@@ -107,8 +106,8 @@ public class Main {
 		return extremeBPList;
 	}
 
-	private static float _getMean(List<WaveData> list) {
-		float sum = 0;
+	private static double _getMean(List<WaveData> list) {
+		double sum = 0;
 		for (WaveData wd : list) {
 			sum += wd.getValue();
 		}
@@ -117,14 +116,15 @@ public class Main {
 
 	// calculate SD
 	// precondition: input data is within 1 hour
-	private static float _getSD(List<WaveData> list) {
-		float mean = _getMean(list);
-		float sum = 0;
+	private static double _getSD(List<WaveData> list) {
+		double mean = _getMean(list);
+		double sum = 0;
 		for (WaveData wd : list) {
-			float diff = wd.getValue() - mean;
+			double diff = wd.getValue() - mean;
 			sum += diff*diff;
 		}
-		return (float)Math.sqrt(sum/list.size());
+		//return Math.sqrt(sum/list.size());	// use N
+		return Math.sqrt(sum/(list.size()-1));	// use N-1
 	}
 
 	private static List<WaveData> dataECG = new ArrayList<WaveData>();
