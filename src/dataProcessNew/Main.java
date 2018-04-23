@@ -33,8 +33,8 @@ public class Main {
 				}
 				
 				//_process(_getOutputFilename(dir));				
-				//_processNew(_getOutputFilename(dir));
-				_processBP(_getOutputFilenameBP(dir));
+				_processNew(_getOutputFilename(dir));
+				//_processBP(_getOutputFilenameBP(dir));
 			} else {
 				System.out.printf("%s is not a directory\n", args[0]);
 			}
@@ -45,7 +45,7 @@ public class Main {
 		System.out.print("Processing INVP(BP)...");
 		
 		StringBuffer sbuf = new StringBuffer();
-		sbuf.append("Type,SD,CV(%)");
+		sbuf.append("Type,SD,CV(%),Mean");
 		sbuf.append(System.lineSeparator());
 		
 		// normal BP
@@ -67,7 +67,7 @@ public class Main {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		System.out.println("done!");
+		System.out.println("\ndone!");
 	}
 
 	private static void _calculateSDnCV(List<WaveData> list, String type, StringBuffer sbuf) {
@@ -75,8 +75,9 @@ public class Main {
 		double sd = _getSD(list);
 		// calculate CV (SD/MN)
 		double cv = sd/mean;
-		System.out.printf("\nSD: %.5f, CV: %.2f%%£¬ list size: %d", sd, cv*100, list.size());
-		sbuf.append(type + "," + sd + "," + cv*100);
+		System.out.printf("\n%s: SD: %.5f, CV: %.2f%%, Mean: %.5f, list size: %d",
+				type, sd, cv*100, mean, list.size());
+		sbuf.append(type + "," + sd + "," + cv*100 + "," + mean);
 		sbuf.append(System.lineSeparator());
 	}
 
@@ -262,41 +263,44 @@ public class Main {
 		sbuf.append("Time,Diff(sec)");
 		sbuf.append(System.lineSeparator());
 		
-		// scan dataECG by frequency 300
-		int frequency = 300;
+		// scan dataECG by initial peak interval 300: TODO
+		int interval = 300;	// peak interval
+		int peakId1 = 0;	// id for peakECG1
+		int peakId2 = 0;	// id for peakECG2
 		for (int i=0; i<dataECG.size();) {
 			// get peakECG and related index by frequency
 			WaveData peakECG = dataECG.get(i);
 			int peakId = i;	// peak index
-			for (int j=i+1; j<i+frequency; ++j) {
+			
+			for (int j=i+1; j<i+interval; ++j) {
 				if (j >= dataECG.size()) break;
 				if (peakECG.getValue() < dataECG.get(j).getValue()) {
 					peakECG = dataECG.get(j);
 					peakId = j;
 				}
 			}
+			
 			// import: adjust i to the start of the next interval
-			i = peakId + frequency/2;
+			i = _getNextScanId(peakId, interval);
 			
 			if (peakECG1 == null) {
 				peakECG1 = peakECG;
-			} else if (peakECG2 == null) {
+				peakId1 = peakId;
+			} else if (peakECG2 == null && _isValidPeak(peakECG, peakECG1)) {
 				peakECG2 = peakECG;
+				peakId2 = peakId;
 				// Step 3
 				peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
-//				System.out.println("\npeakECG1: " + peakECG1);
-//				System.out.println("peakPleth: " + peakPleth);
-//				System.out.println("peakECG2: " + peakECG2);
+				_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
 				
 				// Step 4
 				if (peakPleth != null) {
 					// for debug
 					// "0409.10:21:20.960796980"
 					// "0409.11:01:14.766985886"
-//					if (peakPleth.getTime().equals("0409.11:01:14.766985886")) {
-//						System.out.println("\npeakECG1: " + peakECG1);
-//						System.out.println("peakPleth: " + peakPleth);
-//						System.out.println("peakECG2: " + peakECG2);
+//					if (peakPleth.getTime().equals("0413.08:28:57.400030216")
+//						|| peakPleth.getTime().equals("0413.08:28:57.923594518")) {
+//						_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
 //					}
 					
 					double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
@@ -318,6 +322,10 @@ public class Main {
 				peakECG1 = peakECG2;
 				peakECG2 = null;
 				peakPleth = null;
+				
+				// import: adjust peak interval for more accurate scan in the next round!
+				interval = peakId2-peakId1+1;
+				peakId1 = peakId2;
 			}
 		}
 		
@@ -332,6 +340,33 @@ public class Main {
 		}
 		System.out.println("done!");
 		System.out.println("Data size: " + cnt);
+	}
+
+	// Note: adjust this function to get best scan result!
+	private static int _getNextScanId(int peakId, int lastInterval) {
+		return peakId + lastInterval/2;
+	}
+
+	// enhancement by experience: the ratio of small/big >= 0.5 ?
+	//
+	private static boolean _isValidPeak(WaveData peakECG, WaveData peakECG1) {
+		float small, big;
+		if (peakECG.getValue() <= peakECG1.getValue()) {
+			small = peakECG.getValue();
+			big = peakECG1.getValue();
+		} else {
+			small = peakECG1.getValue();
+			big = peakECG.getValue();
+		}
+		return small/big >= 0.5;
+	}
+
+	private static void _debugPrint(WaveData peakECG1, WaveData peakECG2, WaveData peakPleth,
+			int peakId1, int peakId2) {
+		System.out.println("\npeakECG1: " + peakECG1 + ", id: " + peakId1);
+		System.out.println("peakPleth: " + peakPleth);
+		System.out.println("peakECG2: " + peakECG2 + ", id: " + peakId2);
+		System.out.println("interval: " + (peakId2-peakId1));
 	}
 	
 	/*
