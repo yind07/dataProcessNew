@@ -29,11 +29,14 @@ public class Main {
 					if (f.isFile()) {
 						//System.out.println(f.getName());
 						_readDataByFile(f);
+						if (!dataBP.isEmpty()) {
+							_processBP(_getFilenameBP(dir, f.getName()));
+							dataBP.clear();
+						}
 					}
 				}
 				
-				//_process(_getOutputFilename(dir));				
-				_processNew(_getOutputFilename(dir));
+				//_processNew(_getOutputFilename(dir));
 				//_processBP(_getOutputFilenameBP(dir));
 			} else {
 				System.out.printf("%s is not a directory\n", args[0]);
@@ -41,6 +44,10 @@ public class Main {
 		}
 	}
 	
+	private static String _getFilenameBP(File dir, String name) {
+		return dir.getPath() + "\\" + name + "_BP_info.csv";
+	}
+
 	private static void _processBP(String fout) {
 		System.out.print("Processing INVP(BP)...");
 		
@@ -260,13 +267,15 @@ public class Main {
 		System.out.print("Processing(new)");
 		int cnt = 0;
 		StringBuffer sbuf = new StringBuffer();
-		sbuf.append("Time,Diff(sec)");
+		sbuf.append("Time,PTT(sec)");
 		sbuf.append(System.lineSeparator());
 		
 		// scan dataECG by initial peak interval 300: TODO
-		int interval = 300;	// peak interval
+		int interval = 150;	// peak interval
+		int intervalSum = interval;		// sum of interval
 		int peakId1 = 0;	// id for peakECG1
 		int peakId2 = 0;	// id for peakECG2
+		
 		for (int i=0; i<dataECG.size();) {
 			// get peakECG and related index by frequency
 			WaveData peakECG = dataECG.get(i);
@@ -274,7 +283,9 @@ public class Main {
 			
 			for (int j=i+1; j<i+interval; ++j) {
 				if (j >= dataECG.size()) break;
-				if (peakECG.getValue() < dataECG.get(j).getValue()) {
+				if (peakECG.getValue() < dataECG.get(j).getValue()
+					&& !_isNoise(dataECG, j)
+					&& _isPeak(dataECG, j)) {
 					peakECG = dataECG.get(j);
 					peakId = j;
 				}
@@ -286,7 +297,8 @@ public class Main {
 			if (peakECG1 == null) {
 				peakECG1 = peakECG;
 				peakId1 = peakId;
-			} else if (peakECG2 == null && _isValidPeak(peakECG, peakECG1)) {
+			//} else if (peakECG2 == null && _isNormalChange(peakECG, peakECG1)) {
+			} else if (peakECG2 == null) {
 				peakECG2 = peakECG;
 				peakId2 = peakId;
 				// Step 3
@@ -298,8 +310,9 @@ public class Main {
 					// for debug
 					// "0409.10:21:20.960796980"
 					// "0409.11:01:14.766985886"
-//					if (peakPleth.getTime().equals("0413.08:28:57.400030216")
-//						|| peakPleth.getTime().equals("0413.08:28:57.923594518")) {
+//					if (peakPleth.getTime().equals("0413.08:31:50.416107096")
+//						|| peakPleth.getTime().equals("0413.08:31:49.118790284")
+//						|| peakPleth.getTime().equals("0413.08:31:51.078384387")) {
 //						_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
 //					}
 					
@@ -324,7 +337,9 @@ public class Main {
 				peakPleth = null;
 				
 				// import: adjust peak interval for more accurate scan in the next round!
-				interval = peakId2-peakId1+1;
+				//interval = peakId2-peakId1+1;
+				intervalSum += (peakId2-peakId1+1);
+				interval = intervalSum/(cnt+1);	// try to amortize the interval
 				peakId1 = peakId2;
 			}
 		}
@@ -342,25 +357,60 @@ public class Main {
 		System.out.println("Data size: " + cnt);
 	}
 
+	// experience assumption:
+	// select as peak only if both sides ratio < 0.95
+	private static boolean _isPeak(List<WaveData> data, int id) {
+		double ratioLevel = 0.95;	// experience value
+		if (id < 0 || id >= data.size()) {	// incorrect id
+			return false;
+		} else if (id == 0) {	// special id: first one, no previous one
+			return _getRatio(data.get(id), data.get(id+1)) < ratioLevel;
+		} else if (id == data.size()-1) {	// special id: last one, no following one
+			return _getRatio(data.get(id-1), data.get(id)) < ratioLevel;
+		} else {	// id > 0 && id < data.size()-1
+			return _getRatio(data.get(id), data.get(id+1)) < ratioLevel
+					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel;
+		}
+	}
+
+	// simple rule to signal noise
+	// use the experience of _isNormalChange: data change shouldn't be extreme!
+	private static boolean _isNoise(List<WaveData> data, int id) {
+	
+		if (id < 0 || id >= data.size()) {	// incorrect id
+			return true;
+		} else if (id == 0) {	// special id: first one, no previous one
+			return !_isNormalChange(data.get(id), data.get(id+1));
+		} else if (id == data.size()-1) {	// special id: last one, no following one
+			return !_isNormalChange(data.get(id-1), data.get(id));
+		} else {	// id > 0 && id < data.size()-1
+			return !_isNormalChange(data.get(id-1), data.get(id))
+					|| !_isNormalChange(data.get(id), data.get(id+1));
+		}
+	}
+
 	// Note: adjust this function to get best scan result!
 	private static int _getNextScanId(int peakId, int lastInterval) {
 		return peakId + lastInterval/2;
 	}
 
-	// enhancement by experience: the ratio of small/big >= 0.5 ?
-	//
-	private static boolean _isValidPeak(WaveData peakECG, WaveData peakECG1) {
-		float small, big;
-		if (peakECG.getValue() <= peakECG1.getValue()) {
-			small = peakECG.getValue();
-			big = peakECG1.getValue();
-		} else {
-			small = peakECG1.getValue();
-			big = peakECG.getValue();
-		}
-		return small/big >= 0.5;
+	// enhancement by experience: the ratio of small/big >= 0.4 ?
+	private static boolean _isNormalChange(WaveData wd1, WaveData wd2) {
+		return _getRatio(wd1, wd2) >= 0.4;
 	}
-
+	
+	private static double _getRatio(WaveData wd1, WaveData wd2) {
+		float small, big;
+		if (wd1.getValue() <= wd2.getValue()) {
+			small = wd1.getValue();
+			big = wd2.getValue();
+		} else {
+			small = wd2.getValue();
+			big = wd1.getValue();
+		}
+		return Math.abs(small/big);
+	}
+	
 	private static void _debugPrint(WaveData peakECG1, WaveData peakECG2, WaveData peakPleth,
 			int peakId1, int peakId2) {
 		System.out.println("\npeakECG1: " + peakECG1 + ", id: " + peakId1);
@@ -369,76 +419,4 @@ public class Main {
 		System.out.println("interval: " + (peakId2-peakId1));
 	}
 	
-	/*
-	private static void _process(String fout) {
-		WaveData peakECG1 = null;
-		WaveData peakECG2 = null;
-		WaveData peakPleth = null;
-
-		System.out.print("Processing");
-		int cnt = 0;
-		try {
-			FileWriter fw = new FileWriter(fout);
-			BufferedWriter bw = new BufferedWriter(fw);
-			bw.write("Time,Diff(sec)");
-			bw.newLine();
-			
-			// scan dataECG by frequency 300
-			int frequency = 300;
-			//for (int i=0; i<dataECG.size(); i+=frequency) {
-			for (int i=0; i<dataECG.size();) {
-				//WaveData peakECG = _getPeakECGByFrequency(dataECG, i, frequency);
-				
-				// get peakECG and related index by frequency
-				WaveData peakECG = dataECG.get(i);
-				int peakId = i;	// peak index
-				for (int j=i+1; j<i+frequency; ++j) {
-					if (j >= dataECG.size()) break;
-					if (peakECG.getValue() < dataECG.get(j).getValue()) {
-						peakECG = dataECG.get(j);
-						peakId = j;
-					}
-				}
-				// import: adjust i to the start of the next interval
-				i = peakId + frequency/2;
-				
-				
-				if (peakECG1 == null) {
-					peakECG1 = peakECG;
-				} else if (peakECG2 == null) {
-					peakECG2 = peakECG;
-					// Step 3
-					peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
-					//System.out.println("\npeakECG1: " + peakECG1);
-					//System.out.println("peakPleth: " + peakPleth);
-					//System.out.println("peakECG2: " + peakECG2);
-					
-					// Step 4
-					if (peakPleth != null) {
-						double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
-						//System.out.println("tDiff: " + tDiff);
-						// write result to file
-						bw.write(peakPleth.getTime() + "," + tDiff);
-						bw.newLine();
-						System.out.print(".");
-						cnt++;
-						if (cnt % 100 == 0) {
-							System.out.println();
-						}
-					}
-					// reset
-					peakECG1 = peakECG2;
-					peakECG2 = null;
-					peakPleth = null;
-				}
-			}
-			bw.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		System.out.println("done!");
-		System.out.println("Data size: " + cnt);
-	}
-	*/
-
 }
