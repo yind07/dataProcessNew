@@ -29,14 +29,14 @@ public class Main {
 					if (f.isFile()) {
 						//System.out.println(f.getName());
 						_readDataByFile(f);
-						if (!dataBP.isEmpty()) {
-							_processBP(_getFilenameBP(dir, f.getName()));
-							dataBP.clear();
-						}
+//						if (!dataBP.isEmpty()) {
+//							_processBP(_getFilenameBP(dir, f.getName()));
+//							dataBP.clear();
+//						}
 					}
 				}
 				
-				//_processNew(_getOutputFilename(dir));
+				_processNew(_getOutputFilename(dir));
 				//_processBP(_getOutputFilenameBP(dir));
 			} else {
 				System.out.printf("%s is not a directory\n", args[0]);
@@ -271,7 +271,7 @@ public class Main {
 		sbuf.append(System.lineSeparator());
 		
 		// scan dataECG by initial peak interval 300: TODO
-		int interval = 150;	// peak interval
+		int interval = 200;	// peak interval
 		int intervalSum = interval;		// sum of interval
 		int peakId1 = 0;	// id for peakECG1
 		int peakId2 = 0;	// id for peakECG2
@@ -368,8 +368,14 @@ public class Main {
 		} else if (id == data.size()-1) {	// special id: last one, no following one
 			return _getRatio(data.get(id-1), data.get(id)) < ratioLevel;
 		} else {	// id > 0 && id < data.size()-1
-			return _getRatio(data.get(id), data.get(id+1)) < ratioLevel
-					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel;
+			return (data.get(id-1).getValue() <= data.get(id).getValue()
+					&& data.get(id+1).getValue() <= data.get(id).getValue())
+					&& (_getRatio(data.get(id), data.get(id+1)) < ratioLevel
+					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel)
+				||	(_getRatio(data.get(id), data.get(id+1)) == 1
+					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel)
+				||	(_getRatio(data.get(id), data.get(id+1)) < ratioLevel
+					&& _getRatio(data.get(id-1), data.get(id)) == 1);
 		}
 	}
 
