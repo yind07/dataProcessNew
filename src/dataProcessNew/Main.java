@@ -284,8 +284,7 @@ public class Main {
 			for (int j=i+1; j<i+interval; ++j) {
 				if (j >= dataECG.size()) break;
 				if (peakECG.getValue() < dataECG.get(j).getValue()
-					&& !_isNoise(dataECG, j)
-					&& _isPeak(dataECG, j)) {
+					&& !_isNoise(dataECG, j)) {
 					peakECG = dataECG.get(j);
 					peakId = j;
 				}
@@ -294,53 +293,55 @@ public class Main {
 			// import: adjust i to the start of the next interval
 			i = _getNextScanId(peakId, interval);
 			
-			if (peakECG1 == null) {
-				peakECG1 = peakECG;
-				peakId1 = peakId;
-			//} else if (peakECG2 == null && _isNormalChange(peakECG, peakECG1)) {
-			} else if (peakECG2 == null) {
-				peakECG2 = peakECG;
-				peakId2 = peakId;
-				// Step 3
-				peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
-				_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
-				
-				// Step 4
-				if (peakPleth != null) {
-					// for debug
-					// "0409.10:21:20.960796980"
-					// "0409.11:01:14.766985886"
-//					if (peakPleth.getTime().equals("0413.08:31:50.416107096")
-//						|| peakPleth.getTime().equals("0413.08:31:49.118790284")
-//						|| peakPleth.getTime().equals("0413.08:31:51.078384387")) {
-//						_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
-//					}
+			if (_isPeak(dataECG, peakId)) {
+				if (peakECG1 == null) {
+					peakECG1 = peakECG;
+					peakId1 = peakId;
+				//} else if (peakECG2 == null && _isNormalChange(peakECG, peakECG1)) {
+				} else if (peakECG2 == null) {
+					peakECG2 = peakECG;
+					peakId2 = peakId;
+					// Step 3
+					peakPleth = _getPeakPlethByInterval(dataPleth, peakECG1.getTime(), peakECG2.getTime());
+					_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
 					
-					double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
-					//System.out.println("tDiff: " + tDiff);
-					// write result to file
-					sbuf.append(peakPleth.getTime() + "," + tDiff);
-					sbuf.append(System.lineSeparator());
+					// Step 4
+					if (peakPleth != null) {
+						// for debug
+						// "0409.10:21:20.960796980"
+						// "0409.11:01:14.766985886"
+//						if (peakPleth.getTime().equals("0413.08:31:50.416107096")
+//							|| peakPleth.getTime().equals("0413.08:31:49.118790284")
+//							|| peakPleth.getTime().equals("0413.08:31:51.078384387")) {
+//							_debugPrint(peakECG1, peakECG2, peakPleth, peakId1, peakId2);
+//						}
+						
+						double tDiff = _getInterval(peakECG1.getTime(), peakPleth.getTime());
+						//System.out.println("tDiff: " + tDiff);
+						// write result to file
+						sbuf.append(peakPleth.getTime() + "," + tDiff);
+						sbuf.append(System.lineSeparator());
+						
+						// UI stuff
+						if ((cnt+1) % 10 == 0) {
+							System.out.print(".");	// print dot per 10 times
+						}
+						if ((cnt+1) % 1000 == 0) {
+							System.out.println();	// print newline per 100 dots
+						}
+						cnt++;
+					}
+					// reset
+					peakECG1 = peakECG2;
+					peakECG2 = null;
+					peakPleth = null;
 					
-					// UI stuff
-					if ((cnt+1) % 10 == 0) {
-						System.out.print(".");	// print dot per 10 times
-					}
-					if ((cnt+1) % 1000 == 0) {
-						System.out.println();	// print newline per 100 dots
-					}
-					cnt++;
+					// import: adjust peak interval for more accurate scan in the next round!
+					//interval = peakId2-peakId1+1;
+					intervalSum += (peakId2-peakId1+1);
+					interval = intervalSum/(cnt+1);	// try to amortize the interval
+					peakId1 = peakId2;
 				}
-				// reset
-				peakECG1 = peakECG2;
-				peakECG2 = null;
-				peakPleth = null;
-				
-				// import: adjust peak interval for more accurate scan in the next round!
-				//interval = peakId2-peakId1+1;
-				intervalSum += (peakId2-peakId1+1);
-				interval = intervalSum/(cnt+1);	// try to amortize the interval
-				peakId1 = peakId2;
 			}
 		}
 		
@@ -357,10 +358,11 @@ public class Main {
 		System.out.println("Data size: " + cnt);
 	}
 
+	// Attempt to figure out actual peak wave
 	// experience assumption:
-	// select as peak only if both sides ratio < 0.95
+	// select as peak only if the mean of both sides ratio < 0.978
 	private static boolean _isPeak(List<WaveData> data, int id) {
-		double ratioLevel = 0.95;	// experience value
+		double ratioLevel = 0.978;	// experience value
 		if (id < 0 || id >= data.size()) {	// incorrect id
 			return false;
 		} else if (id == 0) {	// special id: first one, no previous one
@@ -370,8 +372,8 @@ public class Main {
 		} else {	// id > 0 && id < data.size()-1
 			return (data.get(id-1).getValue() <= data.get(id).getValue()
 					&& data.get(id+1).getValue() <= data.get(id).getValue())
-					&& (_getRatio(data.get(id), data.get(id+1)) < ratioLevel
-					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel)
+					&& (_getRatio(data.get(id), data.get(id+1)) 
+						+ _getRatio(data.get(id-1), data.get(id)))/2 < ratioLevel
 				||	(_getRatio(data.get(id), data.get(id+1)) == 1
 					&& _getRatio(data.get(id-1), data.get(id)) < ratioLevel)
 				||	(_getRatio(data.get(id), data.get(id+1)) < ratioLevel
@@ -414,7 +416,13 @@ public class Main {
 			small = wd2.getValue();
 			big = wd1.getValue();
 		}
-		return Math.abs(small/big);
+		// simple adjustment for peak checking!
+		// ensure ratio >= 0 && ratio <= 1
+		double ratio = Math.abs(small/big);
+		if (ratio > 1) {
+			ratio = 1/ratio;
+		}
+		return ratio;
 	}
 	
 	private static void _debugPrint(WaveData peakECG1, WaveData peakECG2, WaveData peakPleth,
